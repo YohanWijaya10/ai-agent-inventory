@@ -34,9 +34,7 @@ export default function InventoryHealthPage() {
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [showDraftPlan, setShowDraftPlan] = useState(false);
-  // Parameters for purchase recommendation
-  const [leadTimeDays, setLeadTimeDays] = useState<number>(7);
-  const [bufferDays, setBufferDays] = useState<number>(3);
+  // Parameters for purchase recommendation (auto only)
 
   type DraftPlanRow = { sku: string; name: string; reason: string; priority: 'High'|'Medium' };
   const [draftPlan, setDraftPlan] = useState<DraftPlanRow[]>([]);
@@ -186,16 +184,28 @@ export default function InventoryHealthPage() {
     setShowDraftPlan(true);
   }
 
+  function getAutoParams(item: ComputedItem): { lead: number; buffer: number } {
+    const avg7 = (item.outQty_7 ?? 0) / 7;
+    const avg30 = (item.outQty_30 ?? 0) / 30;
+    let lead = 7; // default asumsi 7 hari
+    let buffer = 3; // default buffer
+    if (avg30 <= 0 && avg7 <= 0) buffer = 2; // tidak ada pergerakan
+    else if (avg7 > avg30 * 1.3) buffer = 5; // tren naik → buffer lebih besar
+    else buffer = 3; // stabil
+    return { lead, buffer };
+  }
+
   function computeRecommendedQty(item: ComputedItem): number {
+    const { lead, buffer } = getAutoParams(item);
     const available = Math.max(0, (item.qtyOnHand ?? 0) - (item.qtyReserved ?? 0));
     const avg = Math.max(0, item.avgDailyOut ?? 0);
     const baseTarget = Math.max(item.safetyStock ?? 0, item.reorderPoint ?? 0);
     let targetLevel = baseTarget;
     const isStockout = (item.qtyOnHand ?? 0) === 0;
     if (isStockout) {
-      targetLevel = (item.safetyStock ?? baseTarget) + avg * (Math.max(0, leadTimeDays) + Math.max(0, bufferDays));
+      targetLevel = (item.safetyStock ?? baseTarget) + avg * (Math.max(0, lead) + Math.max(0, buffer));
     } else if (avg > 0) {
-      targetLevel = baseTarget + avg * Math.max(0, bufferDays);
+      targetLevel = baseTarget + avg * Math.max(0, buffer);
     } else {
       targetLevel = baseTarget; // slow/no movement
     }
@@ -334,13 +344,7 @@ export default function InventoryHealthPage() {
         <Card className="mb-6"><CardContent className="p-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="font-semibold">Draft Purchase Plan</div>
-            <div className="flex items-center gap-2 ml-auto">
-              <label className="text-sm text-gray-600">Lead time (hari)</label>
-              <input type="number" min={0} max={90} value={leadTimeDays} onChange={(e)=>setLeadTimeDays(Math.max(0, parseInt(e.target.value || '0', 10)))} className="w-20 border rounded px-2 py-1 text-sm" />
-              <label className="text-sm text-gray-600">Buffer (hari)</label>
-              <input type="number" min={0} max={60} value={bufferDays} onChange={(e)=>setBufferDays(Math.max(0, parseInt(e.target.value || '0', 10)))} className="w-20 border rounded px-2 py-1 text-sm" />
-              <Button variant="ghost" onClick={()=>setShowDraftPlan(false)} className="text-gray-700">Tutup</Button>
-            </div>
+            <Button variant="ghost" onClick={()=>setShowDraftPlan(false)} className="text-gray-700 ml-auto">Tutup</Button>
           </div>
 
           {/* Mobile list */}
@@ -360,7 +364,7 @@ export default function InventoryHealthPage() {
                   </div>
                   <div className="text-sm text-gray-700 mt-1">{r.name}</div>
                   <div className="text-xs text-gray-500 mt-1">{r.reason}</div>
-                  <div className="mt-2 text-sm"><span className="text-gray-500">Recommended Qty:</span> <span className="font-semibold">{rec}</span></div>
+                  <div className="mt-2 text-sm flex items-center gap-2"><span className="text-gray-500">Recommended Qty:</span> <span className="font-semibold">{rec}</span></div>
                 </div>
               );
             })}
