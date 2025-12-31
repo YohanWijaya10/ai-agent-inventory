@@ -190,7 +190,6 @@ export default function InventoryHealthPage() {
           <h1 className="text-2xl font-semibold">Kesehatan Persediaan</h1>
           <p className="text-sm text-gray-500">Pantau risiko stok rendah dan overstock untuk keputusan cepat.</p>
         </div>
-        <button onClick={()=>setAskOpen(true)} className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-md bg-brand-600 text-white hover:bg-brand-700">Tanya AI</button>
       </div>
 
       <Card className="mb-6"><CardContent className="p-4">

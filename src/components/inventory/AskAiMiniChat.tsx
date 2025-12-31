@@ -140,7 +140,7 @@ export default function AskAiMiniChat(props: {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Tanya: kenapa SKU ini kritis?"
-          className="border rounded-md px-3 py-2 text-sm flex-1"
+          className="border rounded-md px-3 py-2 text-base sm:text-sm flex-1"
         />
         <button type="submit" disabled={isLoading} className="px-3 py-2 text-sm rounded-md bg-brand-600 text-white disabled:opacity-50">Kirim</button>
       </form>
