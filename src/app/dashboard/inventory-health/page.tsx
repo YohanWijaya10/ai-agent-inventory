@@ -13,6 +13,7 @@ import { computeInventoryHealth, type ComputedItem, type DaysWindow } from '@/li
 import { fetchIssueOutMaps, type OutMaps } from '@/lib/outIssues';
 import { buildActionGroups, buildSelectedItemNote, buildWhyBullets, formatVerdict, getWorstRisk } from '@/lib/insightHelpers';
 import AskAiPopup from '@/components/inventory/AskAiPopup';
+import AskAiFab from '@/components/inventory/AskAiFab';
 
 type TabKey = 'low' | 'over';
 
@@ -121,8 +122,7 @@ export default function InventoryHealthPage() {
     })();
   }, [days, warehouseId, JSON.stringify(computed.lowStock), JSON.stringify(computed.overStock), selectedItem, outMaps, warehouses]);
 
-  const [generatedAt, setGeneratedAt] = useState<string>('');
-  useEffect(() => { setGeneratedAt(new Date().toLocaleString()); }, [days]);
+  // removed generated timestamp display
 
   const lowOverWithOverrides = useMemo(() => {
     const low = computed.lowStock.map(withOutOverrides);
@@ -219,23 +219,20 @@ export default function InventoryHealthPage() {
         {error && (<div className="mt-3 text-sm text-red-600">{error}</div>)}
       </CardContent></Card>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         {kpis.map((k) => (
-          <Card key={k.label}><CardContent className="p-4">
+          <Card key={k.label} className="col-span-1"><CardContent className="p-4">
             <div className="text-sm text-gray-500">{k.label}</div>
             <div className="mt-1 text-xl font-semibold" suppressHydrationWarning>{k.value}</div>
           </CardContent></Card>
         ))}
-        <Card><CardContent className="p-4">
+        <Card className="col-span-2 lg:col-span-1"><CardContent className="p-4">
           <div className="text-sm text-gray-500">Risiko Terburuk</div>
           {worst ? (
             <div className="mt-1"><div className="font-semibold">{worst.name} ({worst.sku})</div><div className="text-xs text-gray-600 mt-1">{worst.reasonText}</div></div>
           ) : (<div className="mt-1 text-gray-500">—</div>)}
         </CardContent></Card>
-        <Card><CardContent className="p-4">
-          <div className="text-sm text-gray-500">Dibuat</div>
-          <div className="mt-1 text-xl font-semibold" suppressHydrationWarning>{(generatedAt || '—')} • {days} hari terakhir</div>
-        </CardContent></Card>
+        
       </div>
 
       <Card className="mb-6"><CardContent className="p-4">
@@ -427,6 +424,9 @@ export default function InventoryHealthPage() {
           />
         );
       })()}
+
+      {/* Floating AI button pinned to the screen */}
+      <AskAiFab onClick={() => setAskOpen(true)} />
     </div>
   );
 }
