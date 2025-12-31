@@ -34,6 +34,9 @@ export default function InventoryHealthPage() {
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [showDraftPlan, setShowDraftPlan] = useState(false);
+  // Parameters for purchase recommendation
+  const [leadTimeDays, setLeadTimeDays] = useState<number>(7);
+  const [bufferDays, setBufferDays] = useState<number>(3);
 
   type DraftPlanRow = { sku: string; name: string; reason: string; priority: 'High'|'Medium' };
   const [draftPlan, setDraftPlan] = useState<DraftPlanRow[]>([]);
@@ -173,7 +176,7 @@ export default function InventoryHealthPage() {
   function onGenerateDraftPlan() {
     const rows: DraftPlanRow[] = [];
     for (const i of agentPlan.stockout) {
-      rows.push({ sku: i.sku, name: i.name, reason: 'Stok habis; perlu pemesanan segera.', priority: 'High' });
+      rows.push({ sku: i.sku, name: i.name, reason: 'Stok habis; top-up ke level aman + buffer.', priority: 'High' });
     }
     for (const i of agentPlan.lowBuffer) {
       const dl = i.daysLeft !== null ? Math.max(0, Math.floor(i.daysLeft)) : undefined;
@@ -181,6 +184,23 @@ export default function InventoryHealthPage() {
     }
     setDraftPlan(rows);
     setShowDraftPlan(true);
+  }
+
+  function computeRecommendedQty(item: ComputedItem): number {
+    const available = Math.max(0, (item.qtyOnHand ?? 0) - (item.qtyReserved ?? 0));
+    const avg = Math.max(0, item.avgDailyOut ?? 0);
+    const baseTarget = Math.max(item.safetyStock ?? 0, item.reorderPoint ?? 0);
+    let targetLevel = baseTarget;
+    const isStockout = (item.qtyOnHand ?? 0) === 0;
+    if (isStockout) {
+      targetLevel = (item.safetyStock ?? baseTarget) + avg * (Math.max(0, leadTimeDays) + Math.max(0, bufferDays));
+    } else if (avg > 0) {
+      targetLevel = baseTarget + avg * Math.max(0, bufferDays);
+    } else {
+      targetLevel = baseTarget; // slow/no movement
+    }
+    const needed = Math.ceil(Math.max(0, targetLevel - available));
+    return Number.isFinite(needed) ? needed : 0;
   }
 
   return (
@@ -312,11 +332,42 @@ export default function InventoryHealthPage() {
       {/* Draft Purchase Plan (artifact) */}
       {showDraftPlan && (
         <Card className="mb-6"><CardContent className="p-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="font-semibold">Draft Purchase Plan</div>
-            <Button variant="ghost" onClick={()=>setShowDraftPlan(false)} className="text-gray-700">Tutup</Button>
+            <div className="flex items-center gap-2 ml-auto">
+              <label className="text-sm text-gray-600">Lead time (hari)</label>
+              <input type="number" min={0} max={90} value={leadTimeDays} onChange={(e)=>setLeadTimeDays(Math.max(0, parseInt(e.target.value || '0', 10)))} className="w-20 border rounded px-2 py-1 text-sm" />
+              <label className="text-sm text-gray-600">Buffer (hari)</label>
+              <input type="number" min={0} max={60} value={bufferDays} onChange={(e)=>setBufferDays(Math.max(0, parseInt(e.target.value || '0', 10)))} className="w-20 border rounded px-2 py-1 text-sm" />
+              <Button variant="ghost" onClick={()=>setShowDraftPlan(false)} className="text-gray-700">Tutup</Button>
+            </div>
           </div>
-          <div className="mt-3 overflow-x-auto">
+
+          {/* Mobile list */}
+          <div className="mt-3 space-y-3 sm:hidden">
+            {draftPlan.length === 0 && (
+              <div className="p-4 text-gray-500 text-center border rounded-md">Tidak ada item untuk dibeli.</div>
+            )}
+            {draftPlan.map((r, idx) => {
+              const all = [...computed.lowStock, ...computed.overStock].map(withOutOverrides);
+              const it = all.find(i => i.sku === r.sku);
+              const rec = it ? computeRecommendedQty(it) : 0;
+              return (
+                <div key={idx} className="border rounded-md p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="font-semibold">{r.sku}</div>
+                    <span className={`text-xs px-2 py-0.5 rounded ${r.priority === 'High' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{r.priority}</span>
+                  </div>
+                  <div className="text-sm text-gray-700 mt-1">{r.name}</div>
+                  <div className="text-xs text-gray-500 mt-1">{r.reason}</div>
+                  <div className="mt-2 text-sm"><span className="text-gray-500">Recommended Qty:</span> <span className="font-semibold">{rec}</span></div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop table */}
+          <div className="mt-3 overflow-x-auto hidden sm:block">
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
                 <tr>
@@ -324,19 +375,26 @@ export default function InventoryHealthPage() {
                   <th className="text-left p-2">Nama</th>
                   <th className="text-left p-2">Alasan</th>
                   <th className="text-left p-2">Prioritas</th>
+                  <th className="text-right p-2">Recommended Qty</th>
                 </tr>
               </thead>
               <tbody>
-                {draftPlan.map((r, idx) => (
-                  <tr key={idx} className="border-t">
-                    <td className="p-2">{r.sku}</td>
-                    <td className="p-2">{r.name}</td>
-                    <td className="p-2">{r.reason}</td>
-                    <td className="p-2">{r.priority}</td>
-                  </tr>
-                ))}
+                {draftPlan.map((r, idx) => {
+                  const all = [...computed.lowStock, ...computed.overStock].map(withOutOverrides);
+                  const it = all.find(i => i.sku === r.sku);
+                  const rec = it ? computeRecommendedQty(it) : 0;
+                  return (
+                    <tr key={idx} className="border-t">
+                      <td className="p-2">{r.sku}</td>
+                      <td className="p-2">{r.name}</td>
+                      <td className="p-2">{r.reason}</td>
+                      <td className="p-2">{r.priority}</td>
+                      <td className="p-2 text-right">{rec}</td>
+                    </tr>
+                  );
+                })}
                 {draftPlan.length === 0 && (
-                  <tr><td colSpan={4} className="p-4 text-gray-500 text-center">Tidak ada item untuk dibeli.</td></tr>
+                  <tr><td colSpan={5} className="p-4 text-gray-500 text-center">Tidak ada item untuk dibeli.</td></tr>
                 )}
               </tbody>
             </table>
