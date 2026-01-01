@@ -93,8 +93,9 @@ function renderEmailHtml(opts: {
     priority: "High" | "Medium";
     recommended: number;
   }[];
+  hideConsumption?: boolean;
 }): string {
-  const { windowDays, kpis, lowTop, overTop, dashboardUrl, ai, draft } = opts;
+  const { windowDays, kpis, lowTop, overTop, dashboardUrl, ai, draft, hideConsumption } = opts;
   const dt = fmtJakarta(new Date());
   const link =
     dashboardUrl || process.env.APP_BASE_URL
@@ -239,13 +240,10 @@ function renderEmailHtml(opts: {
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Nama</th>
           <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Stok</th>
           <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Stok Aman</th>
-          <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Sisa Hari</th>
+          ${hideConsumption ? '' : '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Sisa Hari</th>'}
         </tr>
       </thead>
-      <tbody>${
-        lowRows ||
-        `<tr><td colspan=\"5\" style=\"padding:8px;color:#666\">—</td></tr>`
-      }</tbody>
+      <tbody>${ lowRows || `<tr><td colspan=\"${hideConsumption ? '4' : '5'}\" style=\"padding:8px;color:#666\">—</td></tr>` }</tbody>
     </table>
 
     ${aiSection}
@@ -275,13 +273,10 @@ function renderEmailHtml(opts: {
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Nama</th>
           <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Stok</th>
           <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Stok Aman</th>
-          <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Out 30d</th>
+          ${hideConsumption ? '' : '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Out 30d</th>'}
         </tr>
       </thead>
-      <tbody>${
-        overRows ||
-        `<tr><td colspan=\"5\" style=\"padding:8px;color:#666\">—</td></tr>`
-      }</tbody>
+      <tbody>${ overRows || `<tr><td colspan=\"${hideConsumption ? '4' : '5'}\" style=\"padding:8px;color:#666\">—</td></tr>` }</tbody>
     </table>
 
     <div style="margin-top:16px"><a href="${link}" style="display:inline-block;padding:8px 12px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:6px;font-size:12px">Buka Dashboard</a></div>
@@ -479,6 +474,7 @@ async function runJob(windowDays: DaysWindow = 30) {
     safetyStock: i.safetyStock,
     outQty_30: i.outQty_30,
   }));
+  const hideConsumption = [...lowOverLow, ...lowOverOver].every(x => (x.outQty_7 ?? 0) === 0 && (x.outQty_14 ?? 0) === 0 && (x.outQty_30 ?? 0) === 0 && (x.avgDailyOut ?? 0) === 0);
   // Build AI insights (try DeepSeek, else fallback deterministic)
   let ai: {
     executiveSummary: string | null;
@@ -487,20 +483,23 @@ async function runJob(windowDays: DaysWindow = 30) {
   } | null = null;
   try {
     const client = getDeepseekClient();
-    const system = `Anda adalah AI Inventory Analyst. Wajib keluarkan JSON ketat { "executiveSummary": string|null, "insights": string[], "actions": string[], "itemNote": {"why": string, "action": string}|null } dalam Bahasa Indonesia, gunakan istilah: stok saat ini, stok aman, batas pesan ulang, sisa hari stok. Jangan mengarang angka; pakai field yang diberikan.`;
+    const system = `Anda adalah AI Inventory Analyst. Wajib keluarkan JSON ketat { "executiveSummary": string|null, "insights": string[], "actions": string[], "itemNote": {"why": string, "action": string}|null } dalam Bahasa Indonesia, gunakan istilah: stok saat ini, stok aman, batas pesan ulang${hideConsumption ? '' : ', sisa hari stok'}. Jangan mengarang angka; pakai field yang diberikan. ${hideConsumption ? 'Hindari menyimpulkan laju konsumsi; fokus pada stok vs batas.' : ''}`;
     function slim(item: ComputedItem) {
-      return {
+      const base: any = {
         sku: item.sku,
         name: item.name,
         qtyOnHand: item.qtyOnHand,
         safetyStock: item.safetyStock,
         reorderPoint: item.reorderPoint,
-        outQty_7: item.outQty_7,
-        outQty_14: item.outQty_14,
-        outQty_30: item.outQty_30,
-        avgDailyOut: item.avgDailyOut,
-        daysLeft: item.daysLeft,
       };
+      if (!hideConsumption) {
+        base.outQty_7 = item.outQty_7;
+        base.outQty_14 = item.outQty_14;
+        base.outQty_30 = item.outQty_30;
+        base.avgDailyOut = item.avgDailyOut;
+        base.daysLeft = item.daysLeft;
+      }
+      return base;
     }
     const lowSlim = lowOverLow.slice(0, 10).map(slim);
     const overSlim = lowOverOver.slice(0, 10).map(slim);
@@ -623,6 +622,7 @@ async function runJob(windowDays: DaysWindow = 30) {
     dashboardUrl: process.env.APP_BASE_URL || null,
     ai,
     draft,
+    hideConsumption,
   });
   const subject = `Inventory Health Report • ${fmtJakarta(new Date())} WIB`;
   const messageId = await sendEmailSMTP({ subject, html });
