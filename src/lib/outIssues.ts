@@ -28,8 +28,9 @@ function subDays(base: Date, days: number): Date {
   return d;
 }
 
-async function fetchIssueRange(fromYmd: string, toYmd: string): Promise<TrxRow[]> {
-  const url = `${DATA_PROXY}/api/inventorytransaction?trxType=ISSUE&from=${encodeURIComponent(fromYmd)}&to=${encodeURIComponent(toYmd)}`;
+async function fetchIssueRange(fromYmd: string, toYmd: string, opts?: { warehouseId?: string | number }): Promise<TrxRow[]> {
+  const wh = opts?.warehouseId != null && String(opts.warehouseId) !== '' ? `&warehouseId=${encodeURIComponent(String(opts.warehouseId))}` : '';
+  const url = `${DATA_PROXY}/api/inventorytransaction?trxType=ISSUE&from=${encodeURIComponent(fromYmd)}&to=${encodeURIComponent(toYmd)}${wh}`;
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch ISSUE transactions: ${res.status}`);
   const data = await res.json();
@@ -42,13 +43,13 @@ function groupSumByProduct(rows: TrxRow[]): Record<string, number> {
     if (String(r.trxType).trim().toUpperCase() !== 'ISSUE') continue;
     const pid = String(r.productId ?? '');
     if (!pid) continue;
-    // Prefer qty per requirement; convert string to number with parseInt
+    // Prefer qty if present; support decimal quantities (kg, etc.) using parseFloat
     let q = 0;
     if (typeof r.qty !== 'undefined') {
-      const parsed = parseInt(String(r.qty), 10);
+      const parsed = parseFloat(String(r.qty));
       q = Number.isFinite(parsed) ? parsed : 0;
     } else if (typeof r.signedQty !== 'undefined') {
-      const parsed = parseInt(String(r.signedQty), 10);
+      const parsed = parseFloat(String(r.signedQty));
       q = Number.isFinite(parsed) ? Math.abs(parsed) : 0;
     }
     acc[pid] = (acc[pid] ?? 0) + q;
@@ -56,7 +57,7 @@ function groupSumByProduct(rows: TrxRow[]): Record<string, number> {
   return acc;
 }
 
-export async function fetchIssueOutMaps(opts?: { today?: Date | string }): Promise<OutMaps> {
+export async function fetchIssueOutMaps(opts?: { today?: Date | string; warehouseId?: string | number }): Promise<OutMaps> {
   const today = opts?.today instanceof Date
     ? opts.today
     : (opts?.today ? new Date(String(opts.today)) : new Date());
@@ -66,10 +67,11 @@ export async function fetchIssueOutMaps(opts?: { today?: Date | string }): Promi
   const from14 = fmtYmd(subDays(today, 14));
   const from30 = fmtYmd(subDays(today, 30));
 
+  const wh = opts?.warehouseId;
   const [r7, r14, r30] = await Promise.all([
-    fetchIssueRange(from7, toYmd),
-    fetchIssueRange(from14, toYmd),
-    fetchIssueRange(from30, toYmd),
+    fetchIssueRange(from7, toYmd, { warehouseId: wh }),
+    fetchIssueRange(from14, toYmd, { warehouseId: wh }),
+    fetchIssueRange(from30, toYmd, { warehouseId: wh }),
   ]);
 
   return {
@@ -78,4 +80,3 @@ export async function fetchIssueOutMaps(opts?: { today?: Date | string }): Promi
     out30: groupSumByProduct(r30),
   };
 }
-

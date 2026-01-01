@@ -3,6 +3,7 @@ import nodemailer from 'nodemailer';
 import { loadDomainData, computeInventoryHealth, type DaysWindow, type ComputedItem } from '@/lib/inventoryHealth';
 import { getDeepseekClient, safeParseInsights } from '@/lib/deepseek';
 import { buildActionGroups, formatVerdict } from '@/lib/insightHelpers';
+import { fetchIssueOutMaps, type OutMaps } from '@/lib/outIssues';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -167,16 +168,42 @@ async function sendEmailSMTP({ subject, html }: { subject: string; html: string 
 }
 
 async function runJob(windowDays: DaysWindow = 30) {
-  const { balances, products, transactions } = await loadDomainData({ warehouseId: undefined });
+  const reportWarehouseId = process.env.REPORT_WAREHOUSE_ID && String(process.env.REPORT_WAREHOUSE_ID).trim() !== '' ? String(process.env.REPORT_WAREHOUSE_ID) : undefined;
+  const { balances, products, transactions } = await loadDomainData({ warehouseId: reportWarehouseId ?? undefined });
   const res = computeInventoryHealth({ balances, products, transactions, windowDays });
+  let outMaps: OutMaps | null = null;
+  try {
+    outMaps = await fetchIssueOutMaps({ warehouseId: reportWarehouseId });
+  } catch {
+    outMaps = null;
+  }
+
+  function withOutOverrides(row: ComputedItem): ComputedItem {
+    if (!outMaps) return row;
+    const v7 = outMaps.out7[row.productId];
+    const v14 = outMaps.out14[row.productId];
+    const v30 = outMaps.out30[row.productId];
+    const outQty_7 = typeof v7 === 'number' ? v7 : row.outQty_7;
+    const outQty_14 = typeof v14 === 'number' ? v14 : row.outQty_14;
+    const outQty_30 = typeof v30 === 'number' ? v30 : row.outQty_30;
+    let avgDailyOut = 0;
+    if (outQty_7 > 0) avgDailyOut = outQty_7 / 7;
+    else if (outQty_14 > 0) avgDailyOut = outQty_14 / 14;
+    else if (outQty_30 > 0) avgDailyOut = outQty_30 / 30;
+    const daysLeft = avgDailyOut > 0 ? row.qtyOnHand / avgDailyOut : null;
+    return { ...row, outQty_7, outQty_14, outQty_30, avgDailyOut, daysLeft };
+  }
+
+  const lowOverLow = res.lowStock.map(withOutOverrides);
+  const lowOverOver = res.overStock.map(withOutOverrides);
   const kpis = {
     total: res.summary.totalProductsAnalyzed,
     low: res.summary.lowStockCount,
     over: res.summary.overStockCount,
     worst: res.summary.worstRisk ? { sku: res.summary.worstRisk.sku, name: res.summary.worstRisk.name, daysLeft: res.summary.worstRisk.daysLeft } : null,
   };
-  const lowTop = res.lowStock.slice(0, 5).map((i) => ({ sku: i.sku, name: i.name, qtyOnHand: i.qtyOnHand, safetyStock: i.safetyStock, daysLeft: i.daysLeft }));
-  const overTop = res.overStock.slice(0, 5).map((i) => ({ sku: i.sku, name: i.name, qtyOnHand: i.qtyOnHand, safetyStock: i.safetyStock, outQty_30: i.outQty_30 }));
+  const lowTop = lowOverLow.slice(0, 5).map((i) => ({ sku: i.sku, name: i.name, qtyOnHand: i.qtyOnHand, safetyStock: i.safetyStock, daysLeft: i.daysLeft }));
+  const overTop = lowOverOver.slice(0, 5).map((i) => ({ sku: i.sku, name: i.name, qtyOnHand: i.qtyOnHand, safetyStock: i.safetyStock, outQty_30: i.outQty_30 }));
   // Build AI insights (try DeepSeek, else fallback deterministic)
   let ai: { executiveSummary: string | null; insights: string[]; actions: string[] } | null = null;
   try {
@@ -185,8 +212,8 @@ async function runJob(windowDays: DaysWindow = 30) {
     function slim(item: ComputedItem) {
       return { sku: item.sku, name: item.name, qtyOnHand: item.qtyOnHand, safetyStock: item.safetyStock, reorderPoint: item.reorderPoint, outQty_7: item.outQty_7, outQty_14: item.outQty_14, outQty_30: item.outQty_30, avgDailyOut: item.avgDailyOut, daysLeft: item.daysLeft };
     }
-    const lowSlim = res.lowStock.slice(0, 10).map(slim);
-    const overSlim = res.overStock.slice(0, 10).map(slim);
+    const lowSlim = lowOverLow.slice(0, 10).map(slim);
+    const overSlim = lowOverOver.slice(0, 10).map(slim);
     const user = `Konteks: windowDays=${windowDays}, warehouse=All\n\nTop LowStock:\n${JSON.stringify(lowSlim, null, 2)}\n\nTop OverStock:\n${JSON.stringify(overSlim, null, 2)}\n\nInstruksi: Analisis dan keluarkan JSON.`;
     const chat = await client.chat.completions.create({ model: process.env.DEEPSEEK_MODEL || 'deepseek-chat', messages: [ { role: 'system', content: system }, { role: 'user', content: user } ], temperature: 0.2, response_format: { type: 'json_object' as any } } as any);
     const content = chat.choices?.[0]?.message?.content ?? '';
@@ -194,8 +221,8 @@ async function runJob(windowDays: DaysWindow = 30) {
     ai = { executiveSummary: parsed.executiveSummary, insights: parsed.insights, actions: parsed.actions };
   } catch {
     // Fallback summary using helpers
-    const verdict = formatVerdict(res.lowStock, res.overStock);
-    const ag = buildActionGroups(res.lowStock, res.overStock);
+    const verdict = formatVerdict(lowOverLow as any, lowOverOver as any);
+    const ag = buildActionGroups(lowOverLow as any, lowOverOver as any);
     ai = {
       executiveSummary: verdict.text,
       insights: [
@@ -232,8 +259,8 @@ async function runJob(windowDays: DaysWindow = 30) {
     const needed = Math.ceil(Math.max(0, targetLevel - available));
     return Number.isFinite(needed) ? needed : 0;
   }
-  const stockout = res.lowStock.filter(i => i.qtyOnHand === 0);
-  const lowBuffer = res.lowStock.filter(i => i.qtyOnHand > 0 && i.qtyOnHand <= (i.safetyStock ?? 0) && i.daysLeft !== null && Math.floor(i.daysLeft) <= 7);
+  const stockout = lowOverLow.filter(i => i.qtyOnHand === 0);
+  const lowBuffer = lowOverLow.filter(i => i.qtyOnHand > 0 && i.qtyOnHand <= (i.safetyStock ?? 0) && i.daysLeft !== null && Math.floor(i.daysLeft) <= 7);
   const draft = [
     ...stockout.map(i => ({ sku: i.sku, name: i.name, reason: 'Stok habis; top-up ke level aman + buffer.', priority: 'High' as const, recommended: computeRecommendedQty(i) })),
     ...lowBuffer.map(i => ({ sku: i.sku, name: i.name, reason: i.daysLeft !== null ? `Stok menipis (sisa ~${Math.max(0, Math.floor(i.daysLeft))} hari).` : 'Stok menipis.', priority: 'Medium' as const, recommended: computeRecommendedQty(i) }))
