@@ -1,0 +1,22 @@
+name: Daily Inventory Email
+
+on:
+  schedule:
+    # 13:30 WIB = 06:30 UTC
+    - cron: '30 6 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  call-cron:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel cron endpoint
+        run: |
+          echo "Calling: $CRON_URL at $(date -u)"
+          curl -sS -X GET \
+            -H "x-cron-secret: $CRON_SECRET" \
+            "$CRON_URL"
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          CRON_URL: ${{ secrets.CRON_URL }}
+
