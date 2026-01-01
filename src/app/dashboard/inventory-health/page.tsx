@@ -34,10 +34,6 @@ export default function InventoryHealthPage() {
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [showDraftPlan, setShowDraftPlan] = useState(false);
-  // Test email send states
-  const [testSending, setTestSending] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
-  const [testSecret, setTestSecret] = useState<string>('');
   // Parameters for purchase recommendation (auto only)
 
   type DraftPlanRow = { sku: string; name: string; reason: string; priority: 'High'|'Medium' };
@@ -74,25 +70,7 @@ export default function InventoryHealthPage() {
     }
   }
 
-  async function onTestEmail() {
-    setTestSending(true);
-    setTestResult(null);
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (testSecret.trim()) headers['x-cron-secret'] = testSecret.trim();
-      const res = await fetch('/api/cron/daily-inventory-email', { method: 'POST', headers });
-      const data = await res.json();
-      if (res.ok && data?.ok) {
-        setTestResult('Email terkirim');
-      } else {
-        setTestResult(`Gagal: ${data?.error || res.status}`);
-      }
-    } catch (e: any) {
-      setTestResult(`Error: ${e?.message || 'unknown error'}`);
-    } finally {
-      setTestSending(false);
-    }
-  }
+  // (removed test email sender for production-only automation)
 
   useEffect(() => { void refresh(); }, []);
   useEffect(() => { (async () => { try { const maps = await fetchIssueOutMaps(); setOutMaps(maps); } catch { setOutMaps(null); } })(); }, []);
@@ -272,21 +250,8 @@ export default function InventoryHealthPage() {
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari SKU atau nama" className="border rounded-md px-3 py-1.5 text-sm w-full sm:w-64" />
             <Button variant="outline" onClick={refresh}>Muat Ulang</Button>
-            <Button variant="secondary" onClick={onTestEmail} disabled={testSending}>{testSending ? 'Mengirim…' : 'Test Kirim Email'}</Button>
           </div>
         </div>
-        {/* Admin Secret field for production trigger */}
-        <div className="mt-2 flex items-center gap-2">
-          <input
-            type="password"
-            value={testSecret}
-            onChange={(e) => setTestSecret(e.target.value)}
-            placeholder="Masukkan CRON_SECRET untuk prod"
-            className="border rounded-md px-3 py-1.5 text-sm w-full sm:w-64"
-          />
-          <span className="text-xs text-gray-500">Opsional di dev; wajib di production.</span>
-        </div>
-        {testResult && (<div className={`mt-2 text-sm ${testResult.startsWith('Email terkirim') ? 'text-green-600' : 'text-red-600'}`}>{testResult}</div>)}
         {error && (<div className="mt-3 text-sm text-red-600">{error}</div>)}
       </CardContent></Card>
 
