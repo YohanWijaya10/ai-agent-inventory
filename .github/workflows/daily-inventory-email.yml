@@ -2,8 +2,8 @@ name: Daily Inventory Email
 
 on:
   schedule:
-    # 13:30 WIB = 06:30 UTC
-    - cron: '12 11 * * *'
+    # 18:20 WIB = 11:20 UTC
+    - cron: '20 11 * * *'
   workflow_dispatch: {}
 
 jobs:
@@ -19,4 +19,3 @@ jobs:
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           CRON_URL: ${{ secrets.CRON_URL }}
-
