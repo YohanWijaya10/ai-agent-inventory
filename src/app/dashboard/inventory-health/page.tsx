@@ -34,6 +34,9 @@ export default function InventoryHealthPage() {
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [showDraftPlan, setShowDraftPlan] = useState(false);
+  // Test email send states
+  const [testSending, setTestSending] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
   // Parameters for purchase recommendation (auto only)
 
   type DraftPlanRow = { sku: string; name: string; reason: string; priority: 'High'|'Medium' };
@@ -70,6 +73,24 @@ export default function InventoryHealthPage() {
     }
   }
 
+  async function onTestEmail() {
+    setTestSending(true);
+    setTestResult(null);
+    try {
+      const res = await fetch('/api/cron/daily-inventory-email', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data?.ok) {
+        setTestResult('Email terkirim');
+      } else {
+        setTestResult(`Gagal: ${data?.error || res.status}`);
+      }
+    } catch (e: any) {
+      setTestResult(`Error: ${e?.message || 'unknown error'}`);
+    } finally {
+      setTestSending(false);
+    }
+  }
+
   useEffect(() => { void refresh(); }, []);
   useEffect(() => { (async () => { try { const maps = await fetchIssueOutMaps(); setOutMaps(maps); } catch { setOutMaps(null); } })(); }, []);
 
@@ -98,8 +119,9 @@ export default function InventoryHealthPage() {
 
   useEffect(() => {
     (async () => {
+      setInsightsLoading(true);
+      const start = Date.now();
       try {
-        setInsightsLoading(true);
         const warehouseName = warehouseId === 'ALL' ? 'All' : (warehouses.find((w) => w.id === warehouseId)?.name || warehouseId);
         const lowOver = {
           lowStockTop: computed.lowStock.map(withOutOverrides),
@@ -114,8 +136,12 @@ export default function InventoryHealthPage() {
         };
         const res = await fetch('/api/ai/explain-inventory-health', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         const data = await res.json();
+        const elapsed = Date.now() - start;
+        if (elapsed < 10000) await new Promise((r) => setTimeout(r, 10000 - elapsed));
         setInsights(data);
       } catch (e: any) {
+        const elapsed = Date.now() - start;
+        if (elapsed < 10000) await new Promise((r) => setTimeout(r, 10000 - elapsed));
         setInsights({ executiveSummary: null, insights: [], actions: [], itemNote: null, error: e.message });
       } finally {
         setInsightsLoading(false);
@@ -243,8 +269,10 @@ export default function InventoryHealthPage() {
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari SKU atau nama" className="border rounded-md px-3 py-1.5 text-sm w-full sm:w-64" />
             <Button variant="outline" onClick={refresh}>Muat Ulang</Button>
+            <Button variant="secondary" onClick={onTestEmail} disabled={testSending}>{testSending ? 'Mengirim…' : 'Test Kirim Email'}</Button>
           </div>
         </div>
+        {testResult && (<div className={`mt-2 text-sm ${testResult.startsWith('Email terkirim') ? 'text-green-600' : 'text-red-600'}`}>{testResult}{process.env.NODE_ENV === 'production' ? ' (Catatan: butuh CRON_SECRET untuk dipanggil dari browser di produksi)' : ''}</div>)}
         {error && (<div className="mt-3 text-sm text-red-600">{error}</div>)}
       </CardContent></Card>
 
@@ -269,42 +297,61 @@ export default function InventoryHealthPage() {
           <h3 className="font-semibold">AI Insights</h3>
           <div className="flex items-center gap-2">{insightsLoading && <SBadge variant="secondary">Memuat…</SBadge>}{insights?.error && <SBadge variant="destructive">LLM Error</SBadge>}</div>
         </div>
-        {(() => { const v = formatVerdict(lowOverWithOverrides.low, lowOverWithOverrides.over); const variant = v.tone === 'red' ? 'destructive' : v.tone === 'yellow' ? 'warning' : 'info'; return (<Alert variant={variant as any} className="mt-3 font-semibold">{v.text}</Alert>); })()}
-        {/* Narrative paragraphs (2–4 short paragraphs) */}
-        {(() => {
-          const paras: string[] = [];
-          if (insights?.executiveSummary) paras.push(String(insights.executiveSummary));
-          if (Array.isArray(insights?.insights) && insights.insights.length) {
-            // Join insights into 1–2 paragraphs for readability
-            const half = Math.ceil(Math.min(insights.insights.length, 4) / 2);
-            const first = insights.insights.slice(0, half).join(' ');
-            const second = insights.insights.slice(half, half * 2).join(' ');
-            if (first) paras.push(first);
-            if (second) paras.push(second);
-          }
-          // Fallback if model returned nothing
-          if (!paras.length) {
-            const v = formatVerdict(lowOverWithOverrides.low, lowOverWithOverrides.over);
-            paras.push('Ringkasnya, kondisi stok hari ini menunjukkan pola yang perlu perhatian khusus. Beberapa material berada pada level kritis/menipis, sementara sebagian lain justru berlebih.');
-            if (v.tone === 'red') paras.push('Dampaknya dapat mengganggu kelancaran produksi dan pemenuhan pesanan. Prioritas utama adalah mengamankan material yang sudah habis dan yang sisa harinya tinggal sedikit.');
-            else if (v.tone === 'yellow') paras.push('Jika tidak ditangani segera, stok yang menipis dapat jatuh ke kondisi habis dan menghentikan proses produksi pada beberapa lini.');
-            else paras.push('Stok berlebih mengikat ruang dan modal. Tanpa tindakan, biaya penyimpanan meningkat dan perputaran persediaan menurun.');
-          }
-          return (
-            <div className="mt-4 space-y-2 text-sm text-gray-800">
-              {paras.slice(0, 4).map((p, i) => (<p key={i}>{p}</p>))}
+
+        {insightsLoading ? (
+          <div className="mt-3 space-y-3">
+            <div className="h-10 rounded-md bg-gray-200 animate-pulse" />
+            <div className="space-y-2 mt-2">
+              <div className="h-4 rounded bg-gray-200 animate-pulse" />
+              <div className="h-4 rounded bg-gray-200 animate-pulse w-11/12" />
+              <div className="h-4 rounded bg-gray-200 animate-pulse w-10/12" />
             </div>
-          );
-        })()}
-        {/* Actions (short bullets, max 3) */}
-        <div className="mt-4">
-          <div className="text-xs uppercase text-gray-500 mb-1">Rekomendasi Tindakan</div>
-          {(() => { const ag = buildActionGroups(lowOverWithOverrides.low, lowOverWithOverrides.over); const bullets = [
-            ag.reorder.length ? `Reorder segera: ${ag.reorder.slice(0,5).join(', ')}` : '',
-            ag.monitor.length ? `Pantau dekat: ${ag.monitor.slice(0,5).join(', ')}` : '',
-            ag.reduce.length ? `Kurangi stok: ${ag.reduce.slice(0,5).join(', ')}` : '',
-          ].filter(Boolean).slice(0,3); return bullets.length ? (<ul className="list-disc ml-5 text-sm space-y-1">{bullets.map((b, i) => <li key={i}>{b}</li>)}</ul>) : (<div className="text-sm text-gray-500">—</div>); })()}
-        </div>
+            <div className="space-y-2 mt-4">
+              <div className="h-3 rounded bg-gray-200 animate-pulse w-1/2" />
+              <div className="h-3 rounded bg-gray-200 animate-pulse w-2/3" />
+              <div className="h-3 rounded bg-gray-200 animate-pulse w-1/3" />
+            </div>
+          </div>
+        ) : (
+          <>
+            {(() => { const v = formatVerdict(lowOverWithOverrides.low, lowOverWithOverrides.over); const variant = v.tone === 'red' ? 'destructive' : v.tone === 'yellow' ? 'warning' : 'info'; return (<Alert variant={variant as any} className="mt-3 font-semibold">{v.text}</Alert>); })()}
+            {/* Narrative paragraphs (2–4 short paragraphs) */}
+            {(() => {
+              const paras: string[] = [];
+              if (insights?.executiveSummary) paras.push(String(insights.executiveSummary));
+              if (Array.isArray(insights?.insights) && insights.insights.length) {
+                // Join insights into 1–2 paragraphs for readability
+                const half = Math.ceil(Math.min(insights.insights.length, 4) / 2);
+                const first = insights.insights.slice(0, half).join(' ');
+                const second = insights.insights.slice(half, half * 2).join(' ');
+                if (first) paras.push(first);
+                if (second) paras.push(second);
+              }
+              // Fallback if model returned nothing
+              if (!paras.length) {
+                const v = formatVerdict(lowOverWithOverrides.low, lowOverWithOverrides.over);
+                paras.push('Ringkasnya, kondisi stok hari ini menunjukkan pola yang perlu perhatian khusus. Beberapa material berada pada level kritis/menipis, sementara sebagian lain justru berlebih.');
+                if (v.tone === 'red') paras.push('Dampaknya dapat mengganggu kelancaran produksi dan pemenuhan pesanan. Prioritas utama adalah mengamankan material yang sudah habis dan yang sisa harinya tinggal sedikit.');
+                else if (v.tone === 'yellow') paras.push('Jika tidak ditangani segera, stok yang menipis dapat jatuh ke kondisi habis dan menghentikan proses produksi pada beberapa lini.');
+                else paras.push('Stok berlebih mengikat ruang dan modal. Tanpa tindakan, biaya penyimpanan meningkat dan perputaran persediaan menurun.');
+              }
+              return (
+                <div className="mt-4 space-y-2 text-sm text-gray-800">
+                  {paras.slice(0, 4).map((p, i) => (<p key={i}>{p}</p>))}
+                </div>
+              );
+            })()}
+            {/* Actions (short bullets, max 3) */}
+            <div className="mt-4">
+              <div className="text-xs uppercase text-gray-500 mb-1">Rekomendasi Tindakan</div>
+              {(() => { const ag = buildActionGroups(lowOverWithOverrides.low, lowOverWithOverrides.over); const bullets = [
+                ag.reorder.length ? `Reorder segera: ${ag.reorder.slice(0,5).join(', ')}` : '',
+                ag.monitor.length ? `Pantau dekat: ${ag.monitor.slice(0,5).join(', ')}` : '',
+                ag.reduce.length ? `Kurangi stok: ${ag.reduce.slice(0,5).join(', ')}` : '',
+              ].filter(Boolean).slice(0,3); return bullets.length ? (<ul className="list-disc ml-5 text-sm space-y-1">{bullets.map((b, i) => <li key={i}>{b}</li>)}</ul>) : (<div className="text-sm text-gray-500">—</div>); })()}
+            </div>
+          </>
+        )}
       </CardContent></Card>
 
       {/* Agent Plan */}
