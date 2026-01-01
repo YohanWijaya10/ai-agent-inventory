@@ -51,6 +51,13 @@ function htmlEscape(s: string) {
   );
 }
 
+// Resolve a usable Date from possible date-like fields
+function resolveTrxDate(obj: any): Date {
+  const cand = obj?.trxDate ?? obj?.trxAt ?? obj?.postedAt ?? obj?.createdAt ?? obj?.updatedAt;
+  const d = cand instanceof Date ? cand : new Date(String(cand ?? ""));
+  return isNaN(d.getTime()) ? new Date(0) : d;
+}
+
 function renderEmailHtml(opts: {
   windowDays: DaysWindow;
   kpis: {
@@ -342,15 +349,23 @@ async function runJob(windowDays: DaysWindow = 30) {
   try {
     console.log("[cron] trx samples raw", rawSamples);
   } catch {}
+  // Build SKU -> productId map for fallback matching
+  const skuToPid = new Map<string, string>();
+  try {
+    for (const p of products as any[]) {
+      if (p?.sku && p?.id) skuToPid.set(String(p.sku), String(p.id));
+    }
+  } catch {}
   const normalizedTransactions = transactions.map((t: any) => {
-    const rawType = String(t.trxType ?? t.trxType ?? "")
+    const rawType = String(t.trxType ?? "")
       .trim()
       .toUpperCase();
 
     const isOut = ["ISSUE", "OUT", "SHIP", "CONSUME"].includes(rawType);
     const isIn = ["RECEIPT", "IN", "RECV", "BUY", "PURCHASE"].includes(rawType);
 
-    const normType = isOut ? "OUT" : isIn ? "IN" : rawType;
+    // Keep computeInventoryHealth compatibility by mapping outbound to 'ISSUE' and inbound to 'RECEIPT'
+    const normType = isOut ? "ISSUE" : isIn ? "RECEIPT" : rawType;
 
     const qty = t.qty != null ? Number(t.qty) : 0;
     let signedQty = t.signedQty != null ? Number(t.signedQty) : null;
@@ -359,40 +374,55 @@ async function runJob(windowDays: DaysWindow = 30) {
       signedQty = isOut ? -Math.abs(qty) : isIn ? Math.abs(qty) : qty;
     }
 
+    // Normalize date for window filtering
+    const trxDate = resolveTrxDate(t);
+    // Normalize productId via sku if missing
+    let productId = t.productId != null && String(t.productId) !== "" ? String(t.productId) : undefined;
+    if (!productId && t?.sku) {
+      const pid = skuToPid.get(String(t.sku));
+      if (pid) productId = pid;
+    }
+
     return {
       ...t,
-      trxType: normType, // untuk computeInventoryHealth
+      productId: String(productId ?? t.productId ?? ""),
+      trxType: normType,
       signedQty,
+      trxDate,
     };
   });
 
   // optional debug
   try {
-    console.log("[cron] trx raw sample", transactions.slice(0, 2));
-    console.log(
-      "[cron] trx normalized sample",
-      normalizedTransactions.slice(0, 2)
-    );
-  } catch {}
-
-  const normSamples = (normalizedTransactions as any[])
-    .slice(0, 3)
-    .map((t: any) => ({
-      pid: t.productId,
-      type: t.trxType,
+    console.log("[cron] trx normalized sample", (normalizedTransactions as any[]).slice(0, 3).map((t: any) => ({
+      productId: t.productId,
+      normType: t.trxType,
       qty: t.qty,
-      signed: t.signedQty,
-    }));
+      signedQty: t.signedQty,
+      trxAtUTC: (t.trxDate instanceof Date ? t.trxDate : new Date(t.trxDate)).toISOString(),
+    })));
+  } catch {}
+  // window debug and top-3 outbound 30d
   try {
-    console.log("[cron] trx samples normalized", normSamples);
+    const now = new Date();
+    const d7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const d14 = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const d30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const w30 = (normalizedTransactions as any[]).filter((x: any) => String(x.trxType).toUpperCase() === 'ISSUE' && (x.trxDate instanceof Date ? x.trxDate : new Date(x.trxDate)) >= d30);
+    console.log('[cron] windows', { nowUTC: now.toISOString(), start7UTC: d7.toISOString(), start14UTC: d14.toISOString(), start30UTC: d30.toISOString() });
+    console.log('[cron] out30 count', w30.length);
+    const sumByPid: Record<string, number> = {};
+    for (const x of w30) {
+      const q = x.signedQty != null ? Math.abs(Number(x.signedQty)) : (x.qty != null ? Math.abs(Number(x.qty)) : 0);
+      const pid = String(x.productId ?? '');
+      if (!pid || !Number.isFinite(q)) continue;
+      sumByPid[pid] = (sumByPid[pid] ?? 0) + q;
+    }
+    const top3 = Object.entries(sumByPid).sort((a,b)=>b[1]-a[1]).slice(0,3);
+    console.log('[cron] out30 top3', top3);
   } catch {}
 
-  const res = computeInventoryHealth({
-    balances,
-    products,
-    transactions: normalizedTransactions as any,
-    windowDays,
-  });
+  const res = computeInventoryHealth({ balances, products, transactions: normalizedTransactions as any, windowDays });
   let outMaps: OutMaps | null = null;
   try {
     outMaps = await fetchIssueOutMaps({ warehouseId: reportWarehouseId });
