@@ -3,7 +3,7 @@ name: Daily Inventory Email
 on:
   schedule:
     # 13:30 WIB = 06:30 UTC
-    - cron: '30 6 * * *'
+    - cron: '12 11 * * *'
   workflow_dispatch: {}
 
 jobs:
