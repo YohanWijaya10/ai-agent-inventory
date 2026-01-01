@@ -405,9 +405,10 @@ async function runJob(windowDays: DaysWindow = 30) {
     const v7 = outMaps.out7[row.productId];
     const v14 = outMaps.out14[row.productId];
     const v30 = outMaps.out30[row.productId];
-    const outQty_7 = typeof v7 === "number" ? v7 : row.outQty_7;
-    const outQty_14 = typeof v14 === "number" ? v14 : row.outQty_14;
-    const outQty_30 = typeof v30 === "number" ? v30 : row.outQty_30;
+    // Only override with non-zero values to avoid replacing valid counts with 0 from range API
+    const outQty_7 = typeof v7 === "number" && v7 > 0 ? v7 : row.outQty_7;
+    const outQty_14 = typeof v14 === "number" && v14 > 0 ? v14 : row.outQty_14;
+    const outQty_30 = typeof v30 === "number" && v30 > 0 ? v30 : row.outQty_30;
     let avgDailyOut = 0;
     if (outQty_7 > 0) avgDailyOut = outQty_7 / 7;
     else if (outQty_14 > 0) avgDailyOut = outQty_14 / 14;
@@ -418,6 +419,10 @@ async function runJob(windowDays: DaysWindow = 30) {
 
   const lowOverLow = res.lowStock.map(withOutOverrides);
   const lowOverOver = res.overStock.map(withOutOverrides);
+  try {
+    const dbg = lowOverLow.slice(0, 2).map((i) => ({ sku: i.sku, out7: i.outQty_7, out14: i.outQty_14, out30: i.outQty_30, avg: i.avgDailyOut }));
+    console.log("[cron] out override sample", dbg);
+  } catch {}
   const kpis = {
     total: res.summary.totalProductsAnalyzed,
     low: res.summary.lowStockCount,
