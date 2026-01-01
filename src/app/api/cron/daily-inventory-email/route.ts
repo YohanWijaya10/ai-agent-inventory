@@ -331,27 +331,68 @@ async function runJob(windowDays: DaysWindow = 30) {
   const { balances, products, transactions } = await loadDomainData({
     warehouseId: reportWarehouseId ?? undefined,
   });
-  // Normalize transactions before computing health
-  const rawSamples = transactions.slice(0, 3).map((t: any) => ({ pid: t.productId, type: t.trxType, qty: t.qty, signed: t.signedQty }));
-  try { console.log('[cron] trx samples raw', rawSamples); } catch {}
-  const normalizedTransactions = transactions.map((t: any) => {
-    const typeU = String(t.trxType || '').trim().toUpperCase();
-    const isOut = typeU === 'ISSUE' || typeU === 'OUT' || typeU === 'SHIP' || typeU === 'CONSUME';
-    const isIn = typeU === 'RECEIPT' || typeU === 'IN' || typeU === 'RECV' || typeU === 'BUY' || typeU === 'PURCHASE';
-    const qtyRaw = t.qty != null ? Number(t.qty) : undefined;
-    const signedRaw = t.signedQty != null ? Number(t.signedQty) : undefined;
-    let signedQty = signedRaw;
-    if (signedQty == null && qtyRaw != null && Number.isFinite(qtyRaw)) {
-      signedQty = isOut ? -Math.abs(qtyRaw) : isIn ? Math.abs(qtyRaw) : qtyRaw;
-    }
-    // Keep computeInventoryHealth compatibility: use 'ISSUE' for outbound, 'RECEIPT' for inbound
-    const trxType = isOut ? 'ISSUE' : isIn ? 'RECEIPT' : t.trxType;
-    return { ...t, trxType, signedQty };
-  });
-  const normSamples = (normalizedTransactions as any[]).slice(0, 3).map((t: any) => ({ pid: t.productId, type: t.trxType, qty: t.qty, signed: t.signedQty }));
-  try { console.log('[cron] trx samples normalized', normSamples); } catch {}
 
-  const res = computeInventoryHealth({ balances, products, transactions: normalizedTransactions as any, windowDays });
+  // Normalize transactions before computing health
+  const rawSamples = transactions.slice(0, 3).map((t: any) => ({
+    pid: t.productId,
+    type: t.trxType,
+    qty: t.qty,
+    signed: t.signedQty,
+  }));
+  try {
+    console.log("[cron] trx samples raw", rawSamples);
+  } catch {}
+  const normalizedTransactions = transactions.map((t: any) => {
+    const rawType = String(t.trxType ?? t.trxType ?? "")
+      .trim()
+      .toUpperCase();
+
+    const isOut = ["ISSUE", "OUT", "SHIP", "CONSUME"].includes(rawType);
+    const isIn = ["RECEIPT", "IN", "RECV", "BUY", "PURCHASE"].includes(rawType);
+
+    const normType = isOut ? "OUT" : isIn ? "IN" : rawType;
+
+    const qty = t.qty != null ? Number(t.qty) : 0;
+    let signedQty = t.signedQty != null ? Number(t.signedQty) : null;
+
+    if (signedQty == null && Number.isFinite(qty)) {
+      signedQty = isOut ? -Math.abs(qty) : isIn ? Math.abs(qty) : qty;
+    }
+
+    return {
+      ...t,
+      trxType: normType, // untuk computeInventoryHealth
+      signedQty,
+    };
+  });
+
+  // optional debug
+  try {
+    console.log("[cron] trx raw sample", transactions.slice(0, 2));
+    console.log(
+      "[cron] trx normalized sample",
+      normalizedTransactions.slice(0, 2)
+    );
+  } catch {}
+
+  const normSamples = (normalizedTransactions as any[])
+    .slice(0, 3)
+    .map((t: any) => ({
+      pid: t.productId,
+      type: t.trxType,
+      qty: t.qty,
+      signed: t.signedQty,
+    }));
+  try {
+    console.log("[cron] trx samples normalized", normSamples);
+  } catch {}
+
+  const res = computeInventoryHealth({
+    balances,
+    products,
+    transactions: normalizedTransactions as any,
+    windowDays,
+  });
   let outMaps: OutMaps | null = null;
   try {
     outMaps = await fetchIssueOutMaps({ warehouseId: reportWarehouseId });
