@@ -45,7 +45,7 @@ export default function AskAiMiniChat(props: {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [followUps, setFollowUps] = useState<string[]>([]);
+  // follow-up suggestions removed; conversation is user-driven only
   const endRef = useRef<HTMLDivElement>(null);
 
   const hasStockout = useMemo(() => lowStockTop.some((i) => statusOf(i) === 'STOCKOUT'), [lowStockTop]);
@@ -76,7 +76,6 @@ export default function AskAiMiniChat(props: {
       });
       const data = await res.json();
       const answer: string = data?.answer || 'Maaf, saya belum bisa memproses pertanyaan itu dari data yang tersedia.';
-      setFollowUps(Array.isArray(data?.followUps) ? data.followUps.slice(0, 3) : []);
       const aiMsg: Message = { role: 'assistant', content: answer, ts: Date.now() };
       setMessages((prev) => [...prev.slice(-9), aiMsg]);
       endRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -88,11 +87,6 @@ export default function AskAiMiniChat(props: {
     }
   }
 
-  function onQuick(q: string) {
-    setInput(q);
-    void send(q);
-  }
-
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex items-center justify-between">
@@ -100,40 +94,16 @@ export default function AskAiMiniChat(props: {
         <div className="text-xs text-gray-500">Jawaban berdasarkan data dashboard ini</div>
       </div>
 
-      <div className="mt-2 flex flex-wrap gap-2">
-        {['Kenapa item ini kritis?', 'Apa dampak kalau supplier telat 3 hari?', 'Apa yang harus dilakukan hari ini?'].map((q) => (
-          <button key={q} onClick={() => onQuick(q)} className="text-xs px-2 py-1 rounded-full border hover:bg-gray-50">{q}</button>
-        ))}
-      </div>
-
       <div className="mt-3 h-64 overflow-y-auto space-y-2">
         {messages.map((m, idx) => (
           <div key={idx} className={`max-w-[90%] ${m.role === 'user' ? 'ml-auto text-right' : ''}`}>
             <div className={`${m.role === 'user' ? 'bg-brand-600 text-white' : 'bg-gray-100 text-gray-900'} inline-block px-3 py-2 rounded-lg`}>{m.content}</div>
-            {m.role === 'assistant' && idx === messages.length - 1 && followUps.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {followUps.map((f, i) => (
-                  <button key={i} onClick={() => onQuick(f)} className="text-xs px-2 py-1 rounded-full border hover:bg-gray-50">{f}</button>
-                ))}
-              </div>
-            )}
           </div>
         ))}
         <div ref={endRef} />
       </div>
 
-      {!selectedItem && (
-        <div className="mt-3">
-          <div className="text-xs text-gray-600 mb-1">Pilih SKU cepat:</div>
-          <div className="flex flex-wrap gap-2">
-            {[...new Map([...lowStockTop, ...overStockTop].map(it => [it.sku, it])).values()].slice(0, 10).map((it) => (
-              <button key={it.sku} onClick={() => onPickSku && onPickSku(it.sku)} className="text-xs px-2 py-1 rounded-full border hover:bg-gray-50">
-                {it.sku} — {it.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Quick SKU selection removed to keep chat fully user-driven */}
 
       <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); void send(input); }}>
         <input
