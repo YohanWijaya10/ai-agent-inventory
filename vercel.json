@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/daily-inventory-email",
-      "schedule": "11yan 13 * * *"
+      "schedule": "20 11 * * *"
     }
   ]
 }
