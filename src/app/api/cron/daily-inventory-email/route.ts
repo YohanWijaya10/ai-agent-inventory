@@ -53,8 +53,28 @@ function htmlEscape(s: string) {
 
 // Resolve a usable Date from possible date-like fields
 function resolveTrxDate(obj: any): Date {
-  const cand = obj?.trxDate ?? obj?.trxAt ?? obj?.postedAt ?? obj?.createdAt ?? obj?.updatedAt;
-  const d = cand instanceof Date ? cand : new Date(String(cand ?? ""));
+  const cand =
+    obj?.trxDate ??
+    obj?.trxAt ??
+    obj?.postedAt ??
+    obj?.createdAt ??
+    obj?.updatedAt;
+
+  if (!cand) return new Date(0);
+
+  // already Date
+  if (cand instanceof Date) return isNaN(cand.getTime()) ? new Date(0) : cand;
+
+  let s = String(cand).trim();
+
+  // If "YYYY-MM-DD HH:mm:ss" (common from Postgres timestamp)
+  // Convert to ISO and assume Asia/Jakarta (+07:00)
+  // Example: "2025-12-01 09:00:00" -> "2025-12-01T09:00:00+07:00"
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/.test(s)) {
+    s = s.replace(" ", "T") + "+07:00";
+  }
+
+  const d = new Date(s);
   return isNaN(d.getTime()) ? new Date(0) : d;
 }
 
@@ -104,7 +124,17 @@ function renderEmailHtml(opts: {
     needed: number;
   }[];
 }): string {
-  const { windowDays, kpis, lowTop, overTop, dashboardUrl, ai, draft, hideConsumption, coverage = [] } = opts;
+  const {
+    windowDays,
+    kpis,
+    lowTop,
+    overTop,
+    dashboardUrl,
+    ai,
+    draft,
+    hideConsumption,
+    coverage = [],
+  } = opts;
   const dt = fmtJakarta(new Date());
   const link =
     dashboardUrl || process.env.APP_BASE_URL
@@ -227,10 +257,14 @@ function renderEmailHtml(opts: {
         c.qtyOnHand
       }</td>
       <td style=\"padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-family:Inter,Arial,sans-serif;font-size:12px\">${
-        c.avgDailyOut != null && isFinite(c.avgDailyOut) ? Number(c.avgDailyOut.toFixed(2)) : "—"
+        c.avgDailyOut != null && isFinite(c.avgDailyOut)
+          ? Number(c.avgDailyOut.toFixed(2))
+          : "—"
       }</td>
       <td style=\"padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-family:Inter,Arial,sans-serif;font-size:12px\">${
-        c.daysLeft !== null && isFinite(c.daysLeft) ? Math.max(0, Math.floor(c.daysLeft)) : "—"
+        c.daysLeft !== null && isFinite(c.daysLeft)
+          ? Math.max(0, Math.floor(c.daysLeft))
+          : "—"
       }</td>
       <td style=\"padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-family:Inter,Arial,sans-serif;font-size:12px\">${
         c.targetDays
@@ -278,10 +312,19 @@ function renderEmailHtml(opts: {
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Nama</th>
           <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Stok</th>
           <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Stok Aman</th>
-          ${hideConsumption ? '' : '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Sisa Hari</th>'}
+          ${
+            hideConsumption
+              ? ""
+              : '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Sisa Hari</th>'
+          }
         </tr>
       </thead>
-      <tbody>${ lowRows || `<tr><td colspan=\"${hideConsumption ? '4' : '5'}\" style=\"padding:8px;color:#666\">—</td></tr>` }</tbody>
+      <tbody>${
+        lowRows ||
+        `<tr><td colspan=\"${
+          hideConsumption ? "4" : "5"
+        }\" style=\"padding:8px;color:#666\">—</td></tr>`
+      }</tbody>
     </table>
 
     ${aiSection}
@@ -318,7 +361,8 @@ function renderEmailHtml(opts: {
         </tr>
       </thead>
       <tbody>${
-        coverageRows || `<tr><td colspan=\"7\" style=\"padding:8px;color:#666\">—</td></tr>`
+        coverageRows ||
+        `<tr><td colspan=\"7\" style=\"padding:8px;color:#666\">—</td></tr>`
       }</tbody>
     </table>
 
@@ -330,10 +374,19 @@ function renderEmailHtml(opts: {
           <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Nama</th>
           <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Stok</th>
           <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Stok Aman</th>
-          ${hideConsumption ? '' : '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Out 30d</th>'}
+          ${
+            hideConsumption
+              ? ""
+              : '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Out 30d</th>'
+          }
         </tr>
       </thead>
-      <tbody>${ overRows || `<tr><td colspan=\"${hideConsumption ? '4' : '5'}\" style=\"padding:8px;color:#666\">—</td></tr>` }</tbody>
+      <tbody>${
+        overRows ||
+        `<tr><td colspan=\"${
+          hideConsumption ? "4" : "5"
+        }\" style=\"padding:8px;color:#666\">—</td></tr>`
+      }</tbody>
     </table>
 
     <div style="margin-top:16px"><a href="${link}" style="display:inline-block;padding:8px 12px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:6px;font-size:12px">Buka Dashboard</a></div>
@@ -428,8 +481,18 @@ async function runJob(windowDays: DaysWindow = 30) {
 
     // Normalize date for window filtering
     const trxDate = resolveTrxDate(t);
+    if (trxDate.getTime() === 0) {
+      console.log("[bad date]", {
+        raw: t.trxDate,
+        parsed: trxDate.toISOString(),
+        trxId: t.trxId,
+      });
+    }
     // Normalize productId via sku if missing
-    let productId = t.productId != null && String(t.productId) !== "" ? String(t.productId) : undefined;
+    let productId =
+      t.productId != null && String(t.productId) !== ""
+        ? String(t.productId)
+        : undefined;
     if (!productId && t?.sku) {
       const pid = skuToPid.get(String(t.sku));
       if (pid) productId = pid;
@@ -446,13 +509,19 @@ async function runJob(windowDays: DaysWindow = 30) {
 
   // optional debug
   try {
-    console.log("[cron] trx normalized sample", (normalizedTransactions as any[]).slice(0, 3).map((t: any) => ({
-      productId: t.productId,
-      normType: t.trxType,
-      qty: t.qty,
-      signedQty: t.signedQty,
-      trxAtUTC: (t.trxDate instanceof Date ? t.trxDate : new Date(t.trxDate)).toISOString(),
-    })));
+    console.log(
+      "[cron] trx normalized sample",
+      (normalizedTransactions as any[]).slice(0, 3).map((t: any) => ({
+        productId: t.productId,
+        normType: t.trxType,
+        qty: t.qty,
+        signedQty: t.signedQty,
+        trxAtUTC: (t.trxDate instanceof Date
+          ? t.trxDate
+          : new Date(t.trxDate)
+        ).toISOString(),
+      }))
+    );
   } catch {}
   // window debug and top-3 outbound 30d
   try {
@@ -460,21 +529,42 @@ async function runJob(windowDays: DaysWindow = 30) {
     const d7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const d14 = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
     const d30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const w30 = (normalizedTransactions as any[]).filter((x: any) => String(x.trxType).toUpperCase() === 'ISSUE' && (x.trxDate instanceof Date ? x.trxDate : new Date(x.trxDate)) >= d30);
-    console.log('[cron] windows', { nowUTC: now.toISOString(), start7UTC: d7.toISOString(), start14UTC: d14.toISOString(), start30UTC: d30.toISOString() });
-    console.log('[cron] out30 count', w30.length);
+    const w30 = (normalizedTransactions as any[]).filter(
+      (x: any) =>
+        String(x.trxType).toUpperCase() === "ISSUE" &&
+        (x.trxDate instanceof Date ? x.trxDate : new Date(x.trxDate)) >= d30
+    );
+    console.log("[cron] windows", {
+      nowUTC: now.toISOString(),
+      start7UTC: d7.toISOString(),
+      start14UTC: d14.toISOString(),
+      start30UTC: d30.toISOString(),
+    });
+    console.log("[cron] out30 count", w30.length);
     const sumByPid: Record<string, number> = {};
     for (const x of w30) {
-      const q = x.signedQty != null ? Math.abs(Number(x.signedQty)) : (x.qty != null ? Math.abs(Number(x.qty)) : 0);
-      const pid = String(x.productId ?? '');
+      const q =
+        x.signedQty != null
+          ? Math.abs(Number(x.signedQty))
+          : x.qty != null
+          ? Math.abs(Number(x.qty))
+          : 0;
+      const pid = String(x.productId ?? "");
       if (!pid || !Number.isFinite(q)) continue;
       sumByPid[pid] = (sumByPid[pid] ?? 0) + q;
     }
-    const top3 = Object.entries(sumByPid).sort((a,b)=>b[1]-a[1]).slice(0,3);
-    console.log('[cron] out30 top3', top3);
+    const top3 = Object.entries(sumByPid)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+    console.log("[cron] out30 top3", top3);
   } catch {}
 
-  const res = computeInventoryHealth({ balances, products, transactions: normalizedTransactions as any, windowDays });
+  const res = computeInventoryHealth({
+    balances,
+    products,
+    transactions: normalizedTransactions as any,
+    windowDays,
+  });
   let outMaps: OutMaps | null = null;
   try {
     outMaps = await fetchIssueOutMaps({ warehouseId: reportWarehouseId });
@@ -502,7 +592,13 @@ async function runJob(windowDays: DaysWindow = 30) {
   const lowOverLow = res.lowStock.map(withOutOverrides);
   const lowOverOver = res.overStock.map(withOutOverrides);
   try {
-    const dbg = lowOverLow.slice(0, 2).map((i) => ({ sku: i.sku, out7: i.outQty_7, out14: i.outQty_14, out30: i.outQty_30, avg: i.avgDailyOut }));
+    const dbg = lowOverLow.slice(0, 2).map((i) => ({
+      sku: i.sku,
+      out7: i.outQty_7,
+      out14: i.outQty_14,
+      out30: i.outQty_30,
+      avg: i.avgDailyOut,
+    }));
     console.log("[cron] out override sample", dbg);
   } catch {}
   const kpis = {
@@ -531,14 +627,24 @@ async function runJob(windowDays: DaysWindow = 30) {
     safetyStock: i.safetyStock,
     outQty_30: i.outQty_30,
   }));
-  const hideConsumption = [...lowOverLow, ...lowOverOver].every(x => (x.outQty_7 ?? 0) === 0 && (x.outQty_14 ?? 0) === 0 && (x.outQty_30 ?? 0) === 0 && (x.avgDailyOut ?? 0) === 0);
+  const hideConsumption = [...lowOverLow, ...lowOverOver].every(
+    (x) =>
+      (x.outQty_7 ?? 0) === 0 &&
+      (x.outQty_14 ?? 0) === 0 &&
+      (x.outQty_30 ?? 0) === 0 &&
+      (x.avgDailyOut ?? 0) === 0
+  );
   // Coverage calculation (how many days left and how much needed to reach target days)
   const targetDaysEnv = Number(process.env.REPORT_TARGET_DAYS || "14");
-  const targetDays = Number.isFinite(targetDaysEnv) && targetDaysEnv > 0 ? Math.min(60, Math.max(1, Math.floor(targetDaysEnv))) : 14;
+  const targetDays =
+    Number.isFinite(targetDaysEnv) && targetDaysEnv > 0
+      ? Math.min(60, Math.max(1, Math.floor(targetDaysEnv)))
+      : 14;
   const coverage = lowOverLow.slice(0, 8).map((i) => {
     const avg = (i.avgDailyOut ?? 0) > 0 ? i.avgDailyOut : null;
     const available = Math.max(0, (i.qtyOnHand ?? 0) - (i.qtyReserved ?? 0));
-    const needed = avg != null ? Math.ceil(Math.max(0, targetDays * avg - available)) : 0;
+    const needed =
+      avg != null ? Math.ceil(Math.max(0, targetDays * avg - available)) : 0;
     return {
       sku: i.sku,
       name: i.name,
@@ -557,7 +663,13 @@ async function runJob(windowDays: DaysWindow = 30) {
   } | null = null;
   try {
     const client = getDeepseekClient();
-    const system = `Anda adalah AI Inventory Analyst. Wajib keluarkan JSON ketat { "executiveSummary": string|null, "insights": string[], "actions": string[], "itemNote": {"why": string, "action": string}|null } dalam Bahasa Indonesia, gunakan istilah: stok saat ini, stok aman, batas pesan ulang${hideConsumption ? '' : ', sisa hari stok'}. Jangan mengarang angka; pakai field yang diberikan. ${hideConsumption ? 'Hindari menyimpulkan laju konsumsi; fokus pada stok vs batas.' : ''}`;
+    const system = `Anda adalah AI Inventory Analyst. Wajib keluarkan JSON ketat { "executiveSummary": string|null, "insights": string[], "actions": string[], "itemNote": {"why": string, "action": string}|null } dalam Bahasa Indonesia, gunakan istilah: stok saat ini, stok aman, batas pesan ulang${
+      hideConsumption ? "" : ", sisa hari stok"
+    }. Jangan mengarang angka; pakai field yang diberikan. ${
+      hideConsumption
+        ? "Hindari menyimpulkan laju konsumsi; fokus pada stok vs batas."
+        : ""
+    }`;
     function slim(item: ComputedItem) {
       const base: any = {
         sku: item.sku,
