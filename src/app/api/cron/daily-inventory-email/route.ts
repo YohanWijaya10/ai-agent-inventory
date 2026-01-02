@@ -168,15 +168,6 @@ function renderEmailHtml(opts: {
     recommended: number;
   }[];
   hideConsumption?: boolean;
-  coverage?: {
-    sku: string;
-    name: string;
-    qtyOnHand: number;
-    avgDailyOut: number | null;
-    daysLeft: number | null;
-    targetDays: number;
-    needed: number;
-  }[];
 }): string {
   const {
     windowDays,
@@ -187,7 +178,6 @@ function renderEmailHtml(opts: {
     ai,
     draft,
     hideConsumption,
-    coverage = [],
   } = opts;
 
   const dt = fmtJakarta(new Date());
@@ -322,38 +312,7 @@ function renderEmailHtml(opts: {
     )
     .join("");
 
-  const coverageRows = (coverage || [])
-    .map(
-      (c) => `
-    <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:12px">${htmlEscape(
-        c.sku
-      )}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:12px">${htmlEscape(
-        c.name
-      )}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:12px">${
-        c.qtyOnHand
-      }</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:12px">${
-        c.avgDailyOut != null && isFinite(c.avgDailyOut)
-          ? Number(c.avgDailyOut.toFixed(2))
-          : "—"
-      }</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:12px">${
-        c.daysLeft !== null && isFinite(c.daysLeft)
-          ? Math.max(0, Math.floor(c.daysLeft))
-          : "—"
-      }</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:12px">${
-        c.targetDays
-      }</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:12px">${
-        c.needed
-      }</td>
-    </tr>`
-    )
-    .join("");
+  
 
   return `
   <div style="font-family:Inter,Arial,sans-serif;color:#111">
@@ -425,28 +384,6 @@ function renderEmailHtml(opts: {
       <tbody>${
         draftRows ||
         `<tr><td colspan="5" style="padding:8px;color:#666">—</td></tr>`
-      }</tbody>
-    </table>
-
-    <h3 style="margin:18px 0 6px 0;font-size:14px">Coverage & Kebutuhan (Target Hari)</h3>
-    <div style="color:#666;font-size:12px;margin-bottom:4px">
-      Penjelasan: Berdasarkan stok saat ini dan laju pemakaian rata-rata (prioritas 7 hari, fallback 14 hari), berikut estimasi sisa hari stok dan kebutuhan produksi/pembelian agar cukup.
-    </div>
-    <table style="width:100%;border-collapse:collapse">
-      <thead>
-        <tr>
-          <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">SKU</th>
-          <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Nama</th>
-          <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Stok Saat Ini</th>
-          <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Rata-rata/Hari</th>
-          <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Sisa Hari</th>
-          <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Target Hari</th>
-          <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;color:#666">Kebutuhan</th>
-        </tr>
-      </thead>
-      <tbody>${
-        coverageRows ||
-        `<tr><td colspan="7" style="padding:8px;color:#666">—</td></tr>`
       }</tbody>
     </table>
 
@@ -668,29 +605,7 @@ async function runJob(windowDays: DaysWindow = 30) {
     out14: i.outQty_14 ?? 0,
   }));
 
-  // Coverage calculation (target days)
-  const targetDaysEnv = Number(process.env.REPORT_TARGET_DAYS || "14");
-  const targetDays =
-    Number.isFinite(targetDaysEnv) && targetDaysEnv > 0
-      ? Math.min(60, Math.max(1, Math.floor(targetDaysEnv)))
-      : 14;
-
-  const coverage = lowOverLow.slice(0, 8).map((i) => {
-    const avg = (i.avgDailyOut ?? 0) > 0 ? i.avgDailyOut : null;
-    const available = Math.max(0, (i.qtyOnHand ?? 0) - (i.qtyReserved ?? 0));
-    const needed =
-      avg != null ? Math.ceil(Math.max(0, targetDays * avg - available)) : 0;
-
-    return {
-      sku: i.sku,
-      name: i.name,
-      qtyOnHand: i.qtyOnHand,
-      avgDailyOut: avg,
-      daysLeft: i.daysLeft,
-      targetDays,
-      needed,
-    };
-  });
+  // Coverage section removed per request
 
   /** =========================
    * AI Insights (DeepSeek)
@@ -880,7 +795,6 @@ Instruksi: Analisis dan keluarkan JSON.`;
     ai,
     draft,
     hideConsumption,
-    coverage,
   });
 
   const subject = `Inventory Health Report • ${fmtJakarta(new Date())} WIB`;
